@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "bauplan_live",
+  "version": "${version}",
+  "name": "Bauplan Live",
+  "description": "Schickt Spielerposition und Blöcke an den lokalen Bauplan-Viewer (nur Client).",
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": { "client": ["de.bauplan.live.BauplanLive"] },
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "minecraft": ">=26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
