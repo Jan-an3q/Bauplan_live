@@ -10,6 +10,13 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -25,6 +32,7 @@ public class BauplanLive implements ClientModInitializer {
 		try {
 			HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), PORT), 0);
 			server.createContext("/state", this::handle);
+			server.createContext("/skin", this::skin);
 			server.setExecutor(Executors.newFixedThreadPool(2, r -> {
 				Thread t = new Thread(r, "bauplan-live-http");
 				t.setDaemon(true);
@@ -59,6 +67,46 @@ public class BauplanLive implements ClientModInitializer {
 		try (var os = ex.getResponseBody()) { os.write(b); }
 	}
 
+	private static volatile byte[] skinPng;
+	private static volatile boolean slim, fetching;
+	private static volatile long nextTry;
+
+	private void skin(HttpExchange ex) throws IOException {
+		ex.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+		byte[] b = skinPng;
+		if (b == null) { ex.sendResponseHeaders(404, -1); ex.close(); return; }
+		ex.getResponseHeaders().add("Content-Type", "image/png");
+		ex.sendResponseHeaders(200, b.length);
+		try (var os = ex.getResponseBody()) { os.write(b); }
+	}
+
+	/** Holt den Skin einmalig bei Mojang (nur wenn ein normales Konto genutzt wird). */
+	private static void requestSkin(String uuid) {
+		if (skinPng != null || fetching || System.currentTimeMillis() < nextTry) return;
+		fetching = true;
+		Thread t = new Thread(() -> {
+			try {
+				HttpClient c = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NORMAL).build();
+				String prof = c.send(HttpRequest.newBuilder(URI.create("https://sessionserver.mojang.com/session/minecraft/profile/" + uuid))
+					.timeout(Duration.ofSeconds(8)).GET().build(), HttpResponse.BodyHandlers.ofString()).body();
+				Matcher m = Pattern.compile("\"value\"\\s*:\\s*\"([^\"]+)\"").matcher(prof);
+				if (!m.find()) throw new IOException("kein Profil");
+				String tex = new String(Base64.getDecoder().decode(m.group(1)), StandardCharsets.UTF_8);
+				Matcher u = Pattern.compile("\"SKIN\"\\s*:\\s*\\{\\s*\"url\"\\s*:\\s*\"([^\"]+)\"").matcher(tex);
+				if (!u.find()) throw new IOException("kein Skin");
+				slim = tex.contains("\"slim\"");
+				skinPng = c.send(HttpRequest.newBuilder(URI.create(u.group(1))).timeout(Duration.ofSeconds(8)).GET().build(),
+					HttpResponse.BodyHandlers.ofByteArray()).body();
+			} catch (Exception e) {
+				nextTry = System.currentTimeMillis() + 60000;
+			} finally {
+				fetching = false;
+			}
+		}, "bauplan-skin");
+		t.setDaemon(true);
+		t.start();
+	}
+
 	private static Map<String, Integer> parse(String raw) {
 		Map<String, Integer> m = new HashMap<>();
 		if (raw == null) return m;
@@ -83,6 +131,10 @@ public class BauplanLive implements ClientModInitializer {
 			.append(",\"sneak\":").append(p.isCrouching())
 			.append(",\"hand\":\"").append(BuiltInRegistries.ITEM.getKey(p.getMainHandItem().getItem())).append("\"")
 			.append(",\"off\":\"").append(BuiltInRegistries.ITEM.getKey(p.getOffhandItem().getItem())).append("\"}");
+
+		String uuid = p.getUUID().toString().replace("-", "");
+		requestSkin(uuid);
+		sb.append(",\"uuid\":\"").append(uuid).append("\",\"skin\":").append(skinPng != null).append(",\"slim\":").append(slim);
 
 		if (q.containsKey("x0") && q.containsKey("y0") && q.containsKey("z0")
 			&& q.containsKey("x1") && q.containsKey("y1") && q.containsKey("z1")) {
