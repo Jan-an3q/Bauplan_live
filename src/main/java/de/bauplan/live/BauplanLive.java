@@ -86,11 +86,17 @@ public class BauplanLive implements ClientModInitializer {
 
 		if (q.containsKey("x0") && q.containsKey("y0") && q.containsKey("z0")
 			&& q.containsKey("x1") && q.containsKey("y1") && q.containsKey("z1")) {
-			int r = Math.min(24, q.getOrDefault("r", 12));
+			int r = Math.min(64, q.getOrDefault("r", 12));
 			int px = (int) Math.floor(p.getX()), py = (int) Math.floor(p.getY()), pz = (int) Math.floor(p.getZ());
-			int minX = Math.max(q.get("x0"), px - r), maxX = Math.min(q.get("x1"), px + r);
-			int minY = Math.max(q.get("y0"), py - r), maxY = Math.min(q.get("y1"), py + r);
-			int minZ = Math.max(q.get("z0"), pz - r), maxZ = Math.min(q.get("z1"), pz + r);
+			int minX, maxX, minY, maxY, minZ, maxZ;
+			while (true) {
+				minX = Math.max(q.get("x0"), px - r); maxX = Math.min(q.get("x1"), px + r);
+				minY = Math.max(q.get("y0"), py - r); maxY = Math.min(q.get("y1"), py + r);
+				minZ = Math.max(q.get("z0"), pz - r); maxZ = Math.min(q.get("z1"), pz + r);
+				long vol = (long) Math.max(0, maxX - minX + 1) * Math.max(0, maxY - minY + 1) * Math.max(0, maxZ - minZ + 1);
+				if (vol <= 600000L || r <= 4) break;
+				r -= 4;
+			}
 			List<String> pal = new ArrayList<>();
 			Map<String, Integer> idx = new HashMap<>();
 			StringBuilder bl = new StringBuilder();
